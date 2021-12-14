@@ -1,7 +1,7 @@
 from flask import Flask, request
 from flask_restx import Api
 from flask_cors import CORS
-from problem import get_problem, create_problem
+from problem import get_problem, create_problem, make_problem_with_solution
 import k_dictionary as kd
 
 
@@ -36,6 +36,11 @@ def prob():
                 break 
 
         return problem_not_blanked
+
+@app.route('/problem')
+def problem():
+    return make_problem_with_solution()
+
 
 
 if __name__ == "__main__":
