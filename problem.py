@@ -1,56 +1,129 @@
-from flask import jsonify
-import json
+import fasttext
+from konlpy.tag import Komoran
+import numpy as np
+import random
+import re
+import requests
+from bs4 import BeautifulSoup
 
-def get_problem():
-    prob = {}
 
-    return prob
+model = fasttext.load_model('cc.ko.300.bin')
+komoran = Komoran()
+re = re.compile("[^ㄱ-ㅎㅏ-ㅣ가-힣 ]")
+openApiKey = "BD099954D410A11253DA35DEB404198B"
+conv_length = 6
+quiz_threshold = 5000
 
 
-def create_problem(problem):
-    return jsonify({
-        "problem": "사용자가 직접 만든 문제",
-        "solution": "직접 만든 문제의 answer은 요거",
-        "option":
-            [
-                {"word": "오답1",
-                 "flag": False,
-                 "check": False
-                 },
-                {
-                    "word": "오답2",
-                    "flag": False,
-                    "check": False
-                },
-                {
-                    "word": "정답",
-                    "flag": True,
-                    "check": False
-                },
-                {
-                    "word": "오답3",
-                    "flag": False,
-                    "check": False
-                }
-            ]
-    })
 
-def make_problem_with_solution():
-    new_problem = {}
+def get_similar_word(word):
+    print("Get Similar Word : ", word)
+    return model.get_nearest_neighbors(word, k=1)
+
+
+def search_word(word):
+    ret_json = {"word": word, "items": []}
+
+    # 명사 혹은 대명사면 그대로
+    if komoran.pos(word)[0][1] == 'NN' or 'NP':
+        word = komoran.pos(word)[0][0]
+
+    params = f"?certkey_no=3114&key={openApiKey}&target_type=search&q={word}"
+    openUrl = "https://opendict.korean.go.kr/api/search"+params
+
+    paramsForExample = f"?certkey_no=3114&key={openApiKey}&target_type=search&q={word}&part=exam"
+    openUrlForExample = "https://opendict.korean.go.kr/api/search"+paramsForExample
+
+    res = requests.get(openUrl)
+    soup = BeautifulSoup(res.content, 'html.parser')
+
+    resEx = requests.get(openUrlForExample)
+    soupEx = BeautifulSoup(resEx.content, 'html.parser')
+
+    check = soup.find('total').get_text()
+    if check == '0':
+        return ret_json
+
+    wordPos = soup.find_all('pos')
+    wordDef = soup.find_all('definition')
+    wordEx = soupEx.find_all('example')
+
+    for i in range(min(3, len(wordPos))):
+        item = {}
+        item["pos"] = wordPos[i].get_text().strip()
+        item["definition"] = wordDef[i].get_text().strip()
+        ret_json["items"].append(item)
+
+    return ret_json
+
+
+def cos(A, B):
+    return (A.dot(B.T)/(np.linalg.norm(A) * np.linalg.norm(B)))
+
+
+def create_answer(problem):
+    sentence_vector = model.get_sentence_vector(problem)
+    result = []
+    problem = problem.replace("?", " ")
+    problem = problem.replace(".", " ")
+    problem = problem.replace("!", " ")
+    problem = problem.replace("~", " ")
+
+    for word in problem.split(" "):
+        word_vector = model.get_word_vector(word)
+        result.append([cos(sentence_vector, word_vector), word])
+
+    result = sorted(result, key=lambda x: -x[0])
+    answer = result[0][1]
+    return answer
+
+
+def create_candidate(answer):
+    answer_morphs = komoran.morphs(answer)
+    candidate = model.get_nearest_neighbors(answer)
+
+    candidate = map(lambda x: x[1], candidate)
+    candidate = filter(lambda x: re.search(x) == None, candidate)
+    candidate = filter(lambda x: komoran.morphs(x) != answer_morphs, candidate)
+    candidate = filter(lambda x: 3 * len(answer) > len(x), candidate)
+    candidate = list(candidate)
+
+    if len(candidate) < 3:
+        return None
+    else:
+        return candidate[:3]
+
+
+def change_speaker(context):
+    speaker = ['승열', '돌맹', '붕어', '감자']
+    random.shuffle(speaker)
+    s = []
+
+    for c in context:
+        if c["speaker"] not in s:
+            s.append(c["speaker"])
+        c["speaker"] = speaker[s.index(c["speaker"])]
+
+    return context
+
+
+def quiz_generator(sentence):
+    print("quiz gen : ", sentence)
+    problem_commit = {
+        "context": [{
+            "content" : sentence,
+            "speaker" : ""    
+        }],
+        "option": [],
+        "solution": 0
+    }
+
+    # answer
+    answer = create_answer(sentence)
+    problem_commit['option'] = create_candidate(answer)
+    problem_commit['option'].append(answer)
+    random.shuffle(problem_commit['option'])
+    problem_commit['solution'] = problem_commit['option'].index(answer)
     
-    with open("json/kdict_dummy.json", "r") as kdict_json:
-        kdict_data = json.load(kdict_json)
+    return problem_commit
 
-    with open("json/problem_dummy.json", "r") as problem_json:
-        problem_data = json.load(problem_json) 
-
-    new_problem["context"] = problem_data["problems"][0]["context"]
-    new_problem["option"] = []
-    
-    for i in range(4): 
-        new_problem["option"].append(kdict_data["data"][i])
-        del new_problem["option"][i]["example"]
-    
-    new_problem["solution"] = 1
-
-    return jsonify(new_problem)
