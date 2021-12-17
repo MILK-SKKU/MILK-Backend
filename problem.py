@@ -83,11 +83,14 @@ def create_candidate(answer):
     candidate = model.get_nearest_neighbors(answer)
 
     candidate = map(lambda x: x[1], candidate)
-    candidate = filter(lambda x: re.search(x) == None, candidate)
-    candidate = filter(lambda x: komoran.morphs(x) != answer_morphs, candidate)
-    candidate = filter(lambda x: 3 * len(answer) > len(x), candidate)
-    candidate = list(candidate)
 
+    candidate = filter(lambda x: re.search(x) == None, candidate)
+
+    candidate = filter(lambda x: komoran.morphs(x) != answer_morphs, candidate)
+
+    candidate = filter(lambda x: 3 * len(answer) > len(x), candidate)
+
+    candidate = list(candidate)
     if len(candidate) < 3:
         return None
     else:
@@ -108,22 +111,30 @@ def change_speaker(context):
 
 
 def quiz_generator(sentence):
-    print("quiz gen : ", sentence)
     problem_commit = {
         "context": [{
             "content" : sentence,
             "speaker" : ""    
         }],
-        "option": [],
         "solution": 0
     }
 
     # answer
     answer = create_answer(sentence)
-    problem_commit['option'] = create_candidate(answer)
-    problem_commit['option'].append(answer)
-    random.shuffle(problem_commit['option'])
-    problem_commit['solution'] = problem_commit['option'].index(answer)
+    option = create_candidate(answer)
+    
+    if (answer or option is None):
+        return {
+            "context": [{
+                "content": 'Your sentence is unable to create new question. try longer sentence.',
+                "speaker": ""
+            }],
+            "solution": 0
+        }
+    option.append(answer)
+    random.shuffle(option)
+    problem_commit['solution'] = option.index(answer)
+    problem_commit['option'] = option
     
     return problem_commit
 
